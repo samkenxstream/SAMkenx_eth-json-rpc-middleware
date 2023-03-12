@@ -1,11 +1,11 @@
-import { createAsyncMiddleware, JsonRpcMiddleware } from 'json-rpc-engine';
+import {
+  createAsyncMiddleware,
+  JsonRpcMiddleware,
+  JsonRpcRequest,
+} from 'json-rpc-engine';
 import { EthereumRpcError, ethErrors } from 'eth-rpc-errors';
-import type { Payload, Block } from './types';
-
-/* eslint-disable @typescript-eslint/no-require-imports,@typescript-eslint/no-shadow */
-const fetch = global.fetch || require('node-fetch');
-const btoa = global.btoa || require('btoa');
-/* eslint-enable @typescript-eslint/no-require-imports,@typescript-eslint/no-shadow */
+import { timeout } from './utils/timeout';
+import type { Block } from './types';
 
 const RETRIABLE_ERRORS: string[] = [
   // ignore server overload errors
@@ -18,7 +18,7 @@ const RETRIABLE_ERRORS: string[] = [
   'Failed to fetch',
 ];
 
-export interface PayloadWithOrigin extends Payload {
+export interface PayloadWithOrigin extends JsonRpcRequest<unknown> {
   origin?: string;
 }
 interface Request {
@@ -30,21 +30,34 @@ interface FetchConfig {
   fetchUrl: string;
   fetchParams: Request;
 }
-interface FetchMiddlewareOptions {
-  rpcUrl: string;
-  originHttpHeaderKey?: string;
-}
 
-interface FetchMiddlewareFromReqOptions extends FetchMiddlewareOptions {
-  req: PayloadWithOrigin;
-}
-
+/**
+ * Create middleware for sending a JSON-RPC request to the given RPC URL.
+ *
+ * @param options - Options
+ * @param options.btoa - Generates a base64-encoded string from a binary string.
+ * @param options.fetch - The `fetch` function; expected to be equivalent to `window.fetch`.
+ * @param options.rpcUrl - The URL to send the request to.
+ * @param options.originHttpHeaderKey - If provider, the origin field for each JSON-RPC request
+ * will be attached to each outgoing fetch request under this header.
+ * @returns The fetch middleware.
+ */
 export function createFetchMiddleware({
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  btoa,
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  fetch,
   rpcUrl,
   originHttpHeaderKey,
-}: FetchMiddlewareOptions): JsonRpcMiddleware<string[], Block> {
+}: {
+  btoa: (stringToEncode: string) => string;
+  fetch: typeof global.fetch;
+  rpcUrl: string;
+  originHttpHeaderKey?: string;
+}): JsonRpcMiddleware<unknown, unknown> {
   return createAsyncMiddleware(async (req, res, _next) => {
     const { fetchUrl, fetchParams } = createFetchConfigFromReq({
+      btoa,
       req,
       rpcUrl,
       originHttpHeaderKey,
@@ -55,7 +68,7 @@ export function createFetchMiddleware({
     const retryInterval = 1000;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        const fetchRes: Response = await fetch(fetchUrl, fetchParams);
+        const fetchRes = await fetch(fetchUrl, fetchParams);
         // check for http errrors
         checkForHttpErrors(fetchRes);
         // parse response body
@@ -125,17 +138,34 @@ function parseResponse(fetchRes: Response, body: Record<string, Block>): Block {
   return body.result;
 }
 
+/**
+ * Generate `fetch` configuration for sending the given request to an RPC API.
+ *
+ * @param options - Options
+ * @param options.btoa - Generates a base64-encoded string from a binary string.
+ * @param options.rpcUrl - The URL to send the request to.
+ * @param options.originHttpHeaderKey - If provider, the origin field for each JSON-RPC request
+ * will be attached to each outgoing fetch request under this header.
+ * @returns The fetch middleware.
+ */
 export function createFetchConfigFromReq({
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  btoa,
   req,
   rpcUrl,
   originHttpHeaderKey,
-}: FetchMiddlewareFromReqOptions): FetchConfig {
+}: {
+  btoa: (stringToEncode: string) => string;
+  rpcUrl: string;
+  originHttpHeaderKey?: string;
+  req: PayloadWithOrigin;
+}): FetchConfig {
   const parsedUrl: URL = new URL(rpcUrl);
   const fetchUrl: string = normalizeUrlFromParsed(parsedUrl);
 
   // prepare payload
   // copy only canonical json rpc properties
-  const payload: Payload = {
+  const payload: JsonRpcRequest<unknown> = {
     id: req.id,
     jsonrpc: req.jsonrpc,
     method: req.method,
@@ -193,8 +223,4 @@ function createTimeoutError(): EthereumRpcError<unknown> {
   let msg = `Gateway timeout. The request took too long to process. `;
   msg += `This can happen when querying logs over too wide a block range.`;
   return ethErrors.rpc.internal({ message: msg });
-}
-
-function timeout(duration: number): Promise<NodeJS.Timeout> {
-  return new Promise((resolve) => setTimeout(resolve, duration));
 }

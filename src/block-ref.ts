@@ -6,9 +6,10 @@ import {
 } from 'json-rpc-engine';
 import clone from 'clone';
 import pify from 'pify';
+import type { SafeEventEmitterProvider } from '@metamask/eth-json-rpc-provider';
 import { projectLogger, createModuleLogger } from './logging-utils';
 import { blockTagParamIndex } from './utils/cache';
-import type { Block, SafeEventEmitterProvider } from './types';
+import type { Block } from './types';
 
 interface BlockRefMiddlewareOptions {
   blockTracker?: PollingBlockTracker;
@@ -20,7 +21,7 @@ const log = createModuleLogger(projectLogger, 'block-ref');
 export function createBlockRefMiddleware({
   provider,
   blockTracker,
-}: BlockRefMiddlewareOptions = {}): JsonRpcMiddleware<string[], Block> {
+}: BlockRefMiddlewareOptions = {}): JsonRpcMiddleware<unknown, unknown> {
   if (!provider) {
     throw Error('BlockRefMiddleware - mandatory "provider" option is missing.');
   }
@@ -32,14 +33,16 @@ export function createBlockRefMiddleware({
   }
 
   return createAsyncMiddleware(async (req, res, next) => {
-    const blockRefIndex = blockTagParamIndex(req);
+    const blockRefIndex = blockTagParamIndex(req.method);
 
     // skip if method does not include blockRef
     if (blockRefIndex === undefined) {
       return next();
     }
 
-    const blockRef = req.params?.[blockRefIndex] ?? 'latest';
+    const blockRef = Array.isArray(req.params)
+      ? req.params[blockRefIndex] ?? 'latest'
+      : 'latest';
 
     // skip if not "latest"
     if (blockRef !== 'latest') {
@@ -56,7 +59,7 @@ export function createBlockRefMiddleware({
     // create child request with specific block-ref
     const childRequest = clone(req);
 
-    if (childRequest.params) {
+    if (Array.isArray(childRequest.params)) {
       childRequest.params[blockRefIndex] = latestBlockNumber;
     }
 

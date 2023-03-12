@@ -1,8 +1,9 @@
-import { PollingBlockTracker, Provider } from 'eth-block-tracker';
+import { PollingBlockTracker } from 'eth-block-tracker';
 import { JsonRpcEngine } from 'json-rpc-engine';
 import pify from 'pify';
+import { providerFromEngine } from '@metamask/eth-json-rpc-provider';
 import createHitTrackerMiddleware from '../test/util/createHitTrackerMiddleware';
-import { providerFromEngine, createBlockCacheMiddleware } from '.';
+import { createBlockCacheMiddleware } from '.';
 
 function createTestSetup() {
   // raw data source
@@ -12,7 +13,7 @@ function createTestSetup() {
   const provider = providerFromEngine(engine);
 
   const blockTracker = new PollingBlockTracker({
-    provider: provider as Provider,
+    provider,
   });
 
   return { engine, provider, blockTracker };

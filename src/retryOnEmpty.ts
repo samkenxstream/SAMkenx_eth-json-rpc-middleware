@@ -5,10 +5,12 @@ import {
   JsonRpcMiddleware,
   PendingJsonRpcResponse,
 } from 'json-rpc-engine';
+import type { SafeEventEmitterProvider } from '@metamask/eth-json-rpc-provider';
 import pify from 'pify';
 import { projectLogger, createModuleLogger } from './logging-utils';
 import { blockTagParamIndex } from './utils/cache';
-import { Block, SafeEventEmitterProvider } from './types';
+import { timeout } from './utils/timeout';
+import { Block } from './types';
 
 //
 // RetryOnEmptyMiddleware will retry any request with an empty response that has
@@ -34,7 +36,7 @@ interface RetryOnEmptyMiddlewareOptions {
 export function createRetryOnEmptyMiddleware({
   provider,
   blockTracker,
-}: RetryOnEmptyMiddlewareOptions = {}): JsonRpcMiddleware<string[], Block> {
+}: RetryOnEmptyMiddlewareOptions = {}): JsonRpcMiddleware<unknown, unknown> {
   if (!provider) {
     throw Error(
       'RetryOnEmptyMiddleware - mandatory "provider" option is missing.',
@@ -48,13 +50,15 @@ export function createRetryOnEmptyMiddleware({
   }
 
   return createAsyncMiddleware(async (req, res, next) => {
-    const blockRefIndex: number | undefined = blockTagParamIndex(req);
+    const blockRefIndex: number | undefined = blockTagParamIndex(req.method);
     // skip if method does not include blockRef
     if (blockRefIndex === undefined) {
       return next();
     }
     // skip if not exact block references
-    let blockRef: string | undefined = req.params?.[blockRefIndex];
+    let blockRef: string | undefined = Array.isArray(req.params)
+      ? req.params[blockRefIndex]
+      : undefined;
     // omitted blockRef implies "latest"
     if (blockRef === undefined) {
       blockRef = 'latest';
@@ -139,8 +143,4 @@ async function retry(
   }
   log('Retries exhausted');
   throw new Error('RetryOnEmptyMiddleware - retries exhausted');
-}
-
-function timeout(duration: number): Promise<NodeJS.Timeout> {
-  return new Promise((resolve) => setTimeout(resolve, duration));
 }
